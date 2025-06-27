@@ -4,10 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"github.com/langgenius/dify-plugin-daemon/internal/utils/log"Add commentMore actions
+	"regexp"
 	"strings"
 	"time"
 
-	"github.com/langgenius/dify-plugin-daemon/internal/utils/log"
 	"github.com/langgenius/dify-plugin-daemon/internal/utils/parser"
 	"github.com/redis/go-redis/v9"
 )
@@ -338,7 +339,9 @@ func ScanKeysAsync(match string, fn func([]string) error, context ...redis.Cmdab
 	cursor := uint64(0)
 
 	for {
-		keys, newCursor, err := getCmdable(context...).Scan(ctx, cursor, match, 32).Result()
+		//keys, newCursor, err := getCmdable(context...).Scan(ctx, cursor, match, 32).Result()
+		kvs, newCursor, err := HScan(key, match, cursor, 32)
+
 		if err != nil {
 			return err
 		}
@@ -417,6 +420,32 @@ func ScanMapAsync[V any](key string, match string, fn func(map[string]V) error, 
 	return nil
 }
 
+// cursor = 0 match 32Add commentMore actions
+func HScan(key string, match string, startIdx uint64, count uint64, context ...redis.Cmdable) (keys []string, cursor uint64, err error) {
+	m, err := getCmdable(context...).HGetAll(ctx, serialKey(key)).Result()
+	if err != nil {
+		return nil, 0, err
+	}
+	//获取所有的匹配的结果
+	keys = make([]string, len(m))
+	idx := uint64(0)
+	for s := range m {
+		m, err := regexp.Match(match, []byte(s))
+		if err == nil && m {
+			keys[idx] = s
+			idx = idx + 1
+		}
+	}
+	if startIdx >= idx {
+		return nil, 0, nil
+	}
+	if startIdx+count >= idx {
+		return keys[startIdx:idx], 0, nil
+	}
+	return keys[startIdx : startIdx+idx], startIdx + count, err
+
+}
+
 // SetNX set the key-value pair with expire time
 func SetNX[T any](key string, value T, expire time.Duration, context ...redis.Cmdable) (bool, error) {
 	if client == nil {
@@ -429,7 +458,21 @@ func SetNX[T any](key string, value T, expire time.Duration, context ...redis.Cm
 		return false, err
 	}
 
-	return getCmdable(context...).SetNX(ctx, serialKey(key), bytes, expire).Result()
+		res, err := getCmdable(context...).SetNX(ctx, serialKey(key), bytes, 0).Result()Add commentMore actions
+	if err != nil {
+		return false, err
+	}
+	if res {
+		eir := getCmdable(context...).Expire(ctx, serialKey(key), expire).Err()
+		if eir != nil {
+			getCmdable(context...).Del(ctx, serialKey(key)).Err()
+			return false, eir
+		}
+		return res, err
+	} else {
+		return false, nil
+	}
+
 }
 
 var (
@@ -449,9 +492,7 @@ func Lock(key string, expire time.Duration, tryLockTimeout time.Duration, contex
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if success, err := getCmdable(context...).SetNX(ctx, serialKey(key), "1", expire).Result(); err != nil {
-			return err
-		} else if success {
+		if _, err := SetNX(serialKey(key), "1", expire); err == nil {
 			return nil
 		}
 

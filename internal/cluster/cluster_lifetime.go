@@ -1,11 +1,10 @@
 package cluster
 
 import (
-	"time"
-
-	"github.com/langgenius/dify-plugin-daemon/internal/utils/cache"
 	"github.com/langgenius/dify-plugin-daemon/internal/utils/log"
+	"github.com/langgenius/dify-plugin-daemon/internal/utils/queue"
 	"github.com/langgenius/dify-plugin-daemon/internal/utils/routine"
+	"time"
 )
 
 const (
@@ -87,7 +86,7 @@ func (c *Cluster) clusterLifetime() {
 			log.Error("failed to update the status of the node: %s", err.Error())
 		}
 
-		if err := cache.Publish(CLUSTER_NEW_NODE_CHANNEL, newNodeEvent{
+		if err := queue.Publish(CLUSTER_NEW_NODE_CHANNEL, newNodeEvent{
 			NodeID: c.id,
 		}); err != nil {
 			log.Error("failed to publish the new node event: %s", err.Error())
@@ -98,7 +97,7 @@ func (c *Cluster) clusterLifetime() {
 		}
 	})
 
-	newNodeChan, cancel := cache.Subscribe[newNodeEvent](CLUSTER_NEW_NODE_CHANNEL)
+	newNodeChan, cancel := queue.Subscribe[newNodeEvent](CLUSTER_NEW_NODE_CHANNEL)
 	defer cancel()
 
 	for {
@@ -110,12 +109,12 @@ func (c *Cluster) clusterLifetime() {
 					log.Error("failed to lock the slot to be the master of the cluster: %s", err.Error())
 				} else if success {
 					c.iAmMaster = true
-					log.Info("current node has become the master of the cluster")
+					log.Info("current node has become the master of the cluster %s", c.id)
 					c.notifyBecomeMaster()
 				} else {
 					if c.iAmMaster {
 						c.iAmMaster = false
-						log.Info("current node has released the master slot")
+						log.Info("current node has released the master slot %s", c.id)
 					}
 				}
 			} else {

@@ -10,6 +10,8 @@ import (
 
 func autoMigrate() error {
 	err := DifyPluginDB.AutoMigrate(
+		models.MessageSubscribe{},
+		models.Message{},
 		models.Plugin{},
 		models.PluginInstallation{},
 		models.PluginDeclaration{},
