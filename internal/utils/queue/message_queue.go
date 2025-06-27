@@ -78,7 +78,7 @@ func Subscribe[T any](channel string, clusterId string) (<-chan T, func()) {
 				Channel:       channel,
 				Subscriber:    clusterId,
 				LastMessageId: message.ID,
-				CreatedAt:     time.Now(),
+				CreatedAt:     createTime,
 				UpdatedAt:     time.Now(),
 			}
 			//log.Debug("new Record:%s", newRecord.LastMessageId)

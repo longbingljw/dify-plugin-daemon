@@ -18,6 +18,10 @@ var (
 	ErrDatabaseNotFound = gorm.ErrRecordNotFound
 )
 
+func Exec(sql string, values ...interface{}) error {
+	return DifyPluginDB.Exec(sql, values).Error
+}
+
 func Create(data any, ctx ...*gorm.DB) error {
 	if len(ctx) > 0 {
 		return ctx[0].Create(data).Error
@@ -63,9 +67,9 @@ func AppendAssociation[T any, R any](source *T, field string, associations R, ct
 
 type genericComparableConstraint interface {
 	int | int8 | int16 | int32 | int64 |
-		uint | uint8 | uint16 | uint32 | uint64 |
-		float32 | float64 |
-		bool
+			uint | uint8 | uint16 | uint32 | uint64 |
+			float32 | float64 |
+			bool
 }
 
 type genericEqualConstraint interface {
