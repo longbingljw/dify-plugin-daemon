@@ -19,13 +19,22 @@ type Client interface {
 	GetString(key string) (string, error)
 	Delete(key string) (int64, error)
 	Count(key ...string) (int64, error)
+	// Map operations
 	SetMapField(key string, field string, value string) error
 	GetMapField(key string, field string) (string, error)
 	DeleteMapField(key string, field string) error
 	GetMap(key string) (map[string]string, error)
 	ScanMapStream(key string, cursor uint64, match string, count int64) ([]string, uint64, error)
+	// Advanced operations
 	SetNX(key string, value any, time time.Duration) (bool, error)
 	Expire(key string, time time.Duration) (bool, error)
+	// Counter operations
+	Increase(key string) (int64, error)
+	Decrease(key string) (int64, error)
+	// Key scanning
+	ScanKeys(match string) ([]string, error)
+	ScanKeysAsync(match string, fn func([]string) error) error
+	// Transaction and pub/sub
 	Transaction(fn func(context Context) error) error
 	Publish(channel string, message string) error
 	Subscribe(channel string) (<-chan string, func())
@@ -140,6 +149,34 @@ func Exist(key string, context ...Context) (int64, error) {
 	}
 
 	return getCmdable(context...).Count(serialKey(key))
+}
+
+// Increase the key
+func Increase(key string, context ...Context) (int64, error) {
+	if client == nil {
+		return 0, ErrNotInit
+	}
+
+	return getCmdable(context...).Increase(serialKey(key))
+}
+
+// Decrease the key
+func Decrease(key string, context ...Context) (int64, error) {
+	if client == nil {
+		return 0, ErrNotInit
+	}
+
+	return getCmdable(context...).Decrease(serialKey(key))
+}
+
+// SetExpire set the expire time for the key
+func SetExpire(key string, time time.Duration, context ...Context) error {
+	if client == nil {
+		return ErrNotInit
+	}
+
+	_, err := getCmdable(context...).Expire(serialKey(key), time)
+	return err
 }
 
 // SetMapOneField set the map field with key
@@ -293,7 +330,9 @@ func Lock(key string, expire time.Duration, tryLockTimeout time.Duration, contex
 	defer ticker.Stop()
 
 	for range ticker.C {
-		if _, err := getCmdable(context...).SetNX(serialKey(key), "1", expire); err == nil {
+		if success, err := getCmdable(context...).SetNX(serialKey(key), "1", expire); err != nil {
+			return err
+		} else if success {
 			return nil
 		}
 
@@ -331,7 +370,7 @@ func Transaction(fn func(ctx Context) error) error {
 	return client.Transaction(fn)
 }
 
-func Publish(channel string, message any) error {
+func Publish(channel string, message any, context ...Context) error {
 	if client == nil {
 		return ErrNotInit
 	}
@@ -341,7 +380,7 @@ func Publish(channel string, message any) error {
 		str = parser.MarshalJson(message)
 	}
 
-	return client.Publish(channel, str)
+	return getCmdable(context...).Publish(channel, str)
 }
 
 func Subscribe[T any](channel string) (<-chan T, func()) {
@@ -359,4 +398,54 @@ func Subscribe[T any](channel string) (<-chan T, func()) {
 	}()
 
 	return ch, fn
+}
+
+// ScanKeys scan the keys with match pattern
+func ScanKeys(match string, context ...Context) ([]string, error) {
+	if client == nil {
+		return nil, ErrNotInit
+	}
+
+	result := make([]string, 0)
+
+	if err := ScanKeysAsync(match, func(keys []string) error {
+		result = append(result, keys...)
+		return nil
+	}, context...); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// ScanKeysAsync scan the keys with match pattern, format like "key*"
+func ScanKeysAsync(match string, fn func([]string) error, context ...Context) error {
+	if client == nil {
+		return ErrNotInit
+	}
+
+	return getCmdable(context...).ScanKeysAsync(match, fn)
+}
+
+// SetMapField set the map field with key (supports map[string]any)
+func SetMapField(key string, v map[string]any, context ...Context) error {
+	if client == nil {
+		return ErrNotInit
+	}
+
+	for field, value := range v {
+		if err := SetMapOneField(key, field, value, context...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetMapFieldString get the string
+func GetMapFieldString(key string, field string, context ...Context) (string, error) {
+	if client == nil {
+		return "", ErrNotInit
+	}
+
+	return getCmdable(context...).GetMapField(serialKey(key), field)
 }

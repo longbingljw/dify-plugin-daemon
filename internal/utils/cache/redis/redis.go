@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"time"
 
 	"github.com/langgenius/dify-plugin-daemon/internal/utils/cache"
@@ -10,7 +11,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var ctx = context.Background()
+var (
+	client redis.UniversalClient
+	ctx    = context.Background()
+)
 
 type Context struct {
 	redis.Pipeliner
@@ -39,7 +43,36 @@ func getRedisOptions(addr, username, password string, useSsl bool, db int) *redi
 
 func InitRedisClient(addr, username, password string, useSsl bool, db int) error {
 	opts := getRedisOptions(addr, username, password, useSsl, db)
-	client := redis.NewClient(opts)
+	client = redis.NewClient(opts)
+
+	if _, err := client.Ping(ctx).Result(); err != nil {
+		return err
+	}
+
+	cache.SetClient(&Client{client})
+	return nil
+}
+
+func InitRedisSentinelClient(sentinels []string, masterName, username, password, sentinelUsername, sentinelPassword string, useSsl bool, db int, socketTimeout float64) error {
+	opts := &redis.FailoverOptions{
+		MasterName:       masterName,
+		SentinelAddrs:    sentinels,
+		Username:         username,
+		Password:         password,
+		DB:               db,
+		SentinelUsername: sentinelUsername,
+		SentinelPassword: sentinelPassword,
+	}
+
+	if useSsl {
+		opts.TLSConfig = &tls.Config{}
+	}
+
+	if socketTimeout > 0 {
+		opts.DialTimeout = time.Duration(socketTimeout * float64(time.Second))
+	}
+
+	client = redis.NewFailoverClient(opts)
 
 	if _, err := client.Ping(ctx).Result(); err != nil {
 		return err
@@ -50,8 +83,10 @@ func InitRedisClient(addr, username, password string, useSsl bool, db int) error
 }
 
 func (c *Client) Close() error {
-	client := c.Cmdable.(*redis.Client)
-	return client.Close()
+	if client != nil {
+		return client.Close()
+	}
+	return nil
 }
 
 func (c *Client) Set(key string, value any, time time.Duration) error {
@@ -118,8 +153,15 @@ func (c *Client) Expire(key string, time time.Duration) (bool, error) {
 	return c.Cmdable.Expire(ctx, key, time).Result()
 }
 
+func (c *Client) Increase(key string) (int64, error) {
+	return c.Cmdable.Incr(ctx, key).Result()
+}
+
+func (c *Client) Decrease(key string) (int64, error) {
+	return c.Cmdable.Decr(ctx, key).Result()
+}
+
 func (c *Client) Transaction(fn func(context cache.Context) error) error {
-	client := c.Cmdable.(*redis.Client)
 	return client.Watch(ctx, func(tx *redis.Tx) error {
 		_, err := tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
 			return fn(&Context{p})
@@ -136,7 +178,6 @@ func (c *Client) Publish(channel string, message string) error {
 }
 
 func (c *Client) Subscribe(channel string) (<-chan string, func()) {
-	client := c.Cmdable.(*redis.Client)
 	pubsub := client.Subscribe(ctx, channel)
 	ch := make(chan string)
 	connectionEstablished := make(chan bool)
@@ -171,4 +212,48 @@ func (c *Client) Subscribe(channel string) (<-chan string, func()) {
 	return ch, func() {
 		_ = pubsub.Close()
 	}
+}
+
+func (c *Client) ScanKeys(match string) ([]string, error) {
+	if client == nil {
+		return nil, errors.New("redis client not init")
+	}
+
+	result := make([]string, 0)
+
+	if err := c.ScanKeysAsync(match, func(keys []string) error {
+		result = append(result, keys...)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (c *Client) ScanKeysAsync(match string, fn func([]string) error) error {
+	if client == nil {
+		return errors.New("redis client not init")
+	}
+
+	cursor := uint64(0)
+
+	for {
+		keys, newCursor, err := client.Scan(ctx, cursor, match, 32).Result()
+		if err != nil {
+			return err
+		}
+
+		if err := fn(keys); err != nil {
+			return err
+		}
+
+		if newCursor == 0 {
+			break
+		}
+
+		cursor = newCursor
+	}
+
+	return nil
 }
