@@ -1,6 +1,4 @@
-# Use public image for GitHub Actions compatibility
 FROM golang:1.23-alpine AS builder
-# FROM reg.docker.alibaba-inc.com/dockerhub_common/golang:1.23-alpine AS builder
 
 ARG VERSION=unknown
 
@@ -24,9 +22,7 @@ RUN go build \
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Use public image for GitHub Actions compatibility
 FROM ubuntu:22.04
-# FROM reg.docker.alibaba-inc.com/ant-base/ubuntu:22.04
 USER root
 SHELL ["/bin/bash", "-c"]
 
