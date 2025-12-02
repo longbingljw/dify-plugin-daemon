@@ -7,7 +7,7 @@ import (
 
 func (config *Config) SetDefault() {
 	switch config.DBType {
-	case "oceanbase", "seekdb":
+	case DB_TYPE_OCEANBASE, DB_TYPE_SEEKDB:
 		config.DBType = DB_TYPE_MYSQL
 	}
 	setDefaultInt(&config.ServerPort, 5002)
